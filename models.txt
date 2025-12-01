@@ -1,0 +1,33 @@
+f_model:
+Test Set Metrics:AUC: 0.8442004 Confusion Matrix: 1114 110 433 436 Recall: 0.7985348 F1-score: 0.6162544 
+
+f_model_cleaned:
+Test Set Metrics:AUC: 0.8429372 Confusion Matrix: 1104 110 443 436 Recall: 0.7985348 F1-score: 0.6119298 
+
+f_model_step:
+Test Set Metrics:AUC: 0.8304396 Confusion Matrix: 1145 131 408 419 Recall: 0.7618182 F1-score: 0.6085694 
+
+
+f_model:
+Degrees of Freedom: 4942 Total (i.e. Null);  4928 ResidualNull Deviance:	    6852 Residual Deviance: 4787 	AIC: 4817
+F1-score: 0.6162544
+
+f_model_cleaned:
+Degrees of Freedom: 4903 Total (i.e. Null);  4889 ResidualNull Deviance:	    6798 Residual Deviance: 4509 	AIC: 4539
+F1-score: 0.6119298 
+
+f_inte:
+Degrees of Freedom: 4903 Total (i.e. Null);  4881 ResidualNull Deviance:	    6798 Residual Deviance: 4457 	AIC: 4503
+F1-score: 0.6161544 
+
+f_inte_cleaned:
+Degrees of Freedom: 4881 Total (i.e. Null);  4859 ResidualNull Deviance:	    6767 Residual Deviance: 4354 	AIC: 4400
+F1-score: 0.6191155
+
+f_inte_no_movies:
+Degrees of Freedom: 4901 Total (i.e. Null);  4885 ResidualNull Deviance:	    6787 Residual Deviance: 4457 	AIC: 4491
+F1-score: 0.6095101
+
+
+
+> anova(f_model_cleaned2, f_model_cleaned3)Analysis of Deviance TableModel 1: Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure,     3) + InternetService + StreamingTV + StreamingMovies + ContractModel 2: Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure,     3) + InternetService + StreamingTV + StreamingMovies + Contract +     SeniorCitizen * PaymentMethod + Contract * SeniorCitizen  Resid. Df Resid. Dev Df Deviance1      4868     4428.4            2      4859     4353.7  9   74.604

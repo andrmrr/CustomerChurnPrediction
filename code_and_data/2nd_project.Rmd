@@ -1,0 +1,775 @@
+---
+title: "2nd project"
+output:
+  word_document: default
+  pdf_document: default
+date: "2023-12-17"
+---
+
+```{r}
+rm(list=ls())
+library(dplyr)
+library(mice)
+library(lmtest)
+library(FactoMineR)
+library(car)
+library(ggplot2)
+library(corrplot)
+library(pROC)
+library(chemometrics)
+library(missForest)
+library(ROSE)
+```
+
+```{r}
+df = read.table("telco-customer.csv", header=T, sep=",")
+```
+
+Convert character columns to factors
+```{r}
+df[sapply(df, is.character)] <- lapply(df[sapply(df, is.character)], as.factor)
+df$SeniorCitizen = factor(df$SeniorCitizen)
+summary(df)
+```
+Split data to train and test(30%)
+```{r}
+sample <- sample(c(TRUE, FALSE), nrow(df), replace=TRUE, prob=c(0.7,0.3))
+train  <- df[sample, ]
+test   <- df[!sample, ]
+```
+
+What is the percentage of missing values?
+```{r}
+missing_mean = mean(is.na(train)) ;missing_mean*100
+```
+tenure
+```{r}
+col = train$tenure
+v = summary(col);v
+hist(col, breaks=30)
+Boxplot(col, id=list(n=Inf, labels=row.names(train)))
+# Looks like the first two months have a huge churn
+```
+Monthly Charges
+```{r}
+col = train$MonthlyCharges
+v = summary(col);v
+hist(col, breaks=30)
+Boxplot(col, id=list(n=Inf, labels=row.names(train)))
+```
+
+Total Charges
+```{r}
+col = train$TotalCharges
+v = summary(col);v
+hist(col, breaks=30)
+Boxplot(col, id=list(n=Inf, labels=row.names(train)))
+```
+find multivariate outliers and remove them
+```{r}
+res.out<-Moutlier(na.omit(train[,c(6,19,20)]),quantile=0.995, na.rm=TRUE)
+str(res.out)
+par(mfrow=c(1,1))
+plot(res.out$md, res.out$rd, pch=19, col="cyan") +
+abline(h=res.out$cutoff, lwd=2, lty = 2) +
+abline(v=res.out$cutoff, lwd=2, lty = 2)
+summary(train[which(res.out$md > res.out$cutoff),])
+summary(train)
+train = train[-which(res.out$md > res.out$cutoff),]
+```
+Observe the rows that have missing values
+```{r}
+na_DF <- train[rowSums(is.na(train)) > 0,]
+summary(na_DF)
+```
+Impute missing values with random Forest
+```{r}
+set.seed(17)
+
+rf_imp <- missForest(train[,c(2,3,4,5,7,8,9,10,11,12,13,14,15,16,17,18,21,6,19,20)], variablewise=T, verbose=T) 
+#summary(rf_imp)
+df_imp_rf <- rf_imp$ximp
+#summary(df_imp_rf)
+train_imp = df_imp_rf
+```
+Evaluate imputation by plots
+```{r}
+par(mfrow = c(1,2))
+barplot(table(train$TotalCharges), main = 'TotalCharges: Original Data',
+        col = 'skyblue')
+# Plot the distribution  in the imputed data
+barplot(table(train_imp$TotalCharges), main = 'TotalCharges: Random Forest impute',
+        col = 'skyblue')
+```
+Evaluate imputation by statistics
+```{r}
+print("TotalCharges")
+print("Original:")
+summary(train$TotalCharges)
+print("Random Forest:")
+summary(train_imp$TotalCharges)
+train$TotalCharges = train_imp$TotalCharges
+```
+Oversample the train data, so Churn yes and no are almost equaly distributed
+```{r}
+train<-train[-1]
+train_rose <- ovun.sample(Churn~., data = train, N = nrow(train), p = 0.5)$data
+summary(train)
+summary(train_rose)
+train <- train_rose
+```
+
+Churn
+```{r}
+counts <- table(train$Churn)
+barplot(counts, main="Churn Distribution", xlab="Churn", ylab='Count')
+prop.table(counts)
+```
+Churn profiling
+```{r}
+res.cat <-catdes(train, num.var=20)
+res.cat$test.chi
+res.cat$quanti
+res.cat$quanti.var
+res.cat$category
+```
+Plot Churn by numeric variables
+```{r}
+par(mfrow = c(1,3))
+ggplot(train, aes(x = Churn, y = tenure)) +
+  geom_boxplot() +
+  labs(title = "Distribution of Tenure by Churn Status",
+       x = "Churn Status",
+       y = "Tenure") +
+  theme_minimal()
+ggplot(train, aes(x = Churn, y = MonthlyCharges)) +
+  geom_boxplot() +
+  labs(title = "Distribution of MonthlyCharges by Churn Status",
+       x = "Churn Status",
+       y = "MonthlyCharges") +
+  theme_minimal()
+ggplot(train, aes(x = Churn, y = TotalCharges)) +
+  geom_boxplot() +
+  labs(title = "Distribution of TotalCharges by Churn Status",
+       x = "Churn Status",
+       y = "Total Charges") +
+  theme_minimal()
+```
+Plot Churn by factors
+```{r}
+ggplot(train, aes(x = Contract, fill = Churn)) +
+  geom_bar(position = "fill") +
+  labs(title = "Churn Distribution by Contract Type",
+       x = "Contract Type",
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  theme_minimal()
+ggplot(train, aes(x = TechSupport, fill = Churn)) +
+  geom_bar(position = "fill") +
+  labs(title = "Churn Distribution by TechSupport Type",
+       x = "TechSupport Type",
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  theme_minimal()
+ggplot(train, aes(x = OnlineSecurity, fill = Churn)) +
+  geom_bar(position = "fill") +
+  labs(title = "Churn Distribution by OnlineSecurity Type",
+       x = "OnlineSecurity Type",
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  theme_minimal()
+ggplot(train, aes(x = InternetService, fill = Churn)) +
+  geom_bar(position = "fill") +
+  labs(title = "Churn Distribution by InternetService Type",
+       x = "InternetService Type",
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  theme_minimal()
+```
+Feature selection:
+
+Find importance of each variable
+```{r}
+set.seed(123)
+# Fit a logistic regression model
+model <- glm(Churn ~ ., data = train, family = "binomial")
+
+# Display the summary to see variable coefficients and significance
+summary_result = summary(model)
+
+# Extract variable importance
+variable_importance <- coef(model)
+
+# Display variable importance
+print("Variable Importance:")
+print(variable_importance)
+```
+print the features that are significant (p_value)
+```{r}
+# Assuming 'summary_result' is the summary output of your logistic regression model
+significant_level <- 0.05
+
+# Filter coefficients based on p-values
+significant_coefficients <- summary_result$coefficients[summary_result$coefficients[, "Pr(>|z|)"] < significant_level, ]
+
+# Display the significant coefficients
+print(significant_coefficients)
+```
+Keep only the features that are significant (also in test)
+```{r}
+# Subset the dataframe
+train2 <- train[, c('SeniorCitizen', 'Partner', 'tenure', 'MultipleLines', 'InternetService', 'OnlineBackup', 'StreamingTV', 'StreamingMovies', 'Contract', 'PaperlessBilling', 'PaymentMethod', 'MonthlyCharges', 'TotalCharges', 'Churn')]
+
+# Display the updated dataframe
+print(train2)
+train <- train2
+
+test <- test[, c('SeniorCitizen', 'Partner', 'tenure', 'MultipleLines', 'InternetService', 'OnlineBackup', 'StreamingTV', 'StreamingMovies', 'Contract', 'PaperlessBilling', 'PaymentMethod', 'MonthlyCharges', 'TotalCharges', 'Churn')]
+```
+
+```{r}
+# Assessing the need for transformation
+numeric_vars <- c("tenure", "MonthlyCharges", "TotalCharges")
+train[, numeric_vars] <- sapply(train[, numeric_vars], as.numeric)
+
+# Histograms
+par(mfrow = c(1, 3))
+for (var in numeric_vars) {
+  hist(train[[var]], main = paste("Histogram of", var), col = "lightblue", border = "black")
+}
+# Summary statistics
+summary(train[, numeric_vars])
+
+# Skewness and Kurtosis
+library(moments)
+skewness(train[, numeric_vars])
+kurtosis(train[, numeric_vars])
+
+# Q-Q plots
+par(mfrow = c(1, 3))
+for (var in numeric_vars) {
+  qqnorm(train[[var]], main = paste("Q-Q Plot of", var))
+  qqline(train[[var]])
+}
+```
+Do the numerical values need transformation?
+```{r}
+# Plot the relationship
+plot(train$MonthlyCharges, train$Churn, pch = 16, col = ifelse(train$Churn == "Yes", "red", "blue"))
+
+# Fit logistic regression without transformation
+model_linear <- glm(Churn ~ MonthlyCharges, data = train, family = "binomial")
+
+# Plot the logistic regression curve
+plot(curve(predict(model_linear, newdata = data.frame(MonthlyCharges = x), type = "response"), add = TRUE, col = "green"))
+
+
+# Fit logistic regression with a quadratic transformation
+train$MonthlyCharges_squared <- train$MonthlyCharges^2
+model_quadratic <- glm(Churn ~ MonthlyCharges_squared, data = train, family = "binomial")
+
+# Plot the logistic regression curve with quadratic transformation
+curve(predict(model_quadratic, newdata = data.frame(MonthlyCharges_squared = x^2), type = "response"), add = TRUE, col = "orange")
+
+
+
+# Plot the relationship
+plot(train$TotalCharges, train$Churn, pch = 16, col = ifelse(train$Churn == "Yes", "red", "blue"))
+
+# Fit logistic regression without transformation
+model_linear <- glm(Churn ~ TotalCharges, data = train, family = "binomial")
+
+# Plot the logistic regression curve
+plot(curve(predict(model_linear, newdata = data.frame(TotalCharges = x), type = "response"), add = TRUE, col = "green"))
+
+
+# Fit logistic regression with a quadratic transformation
+train$TotalCharges_squared <- train$TotalCharges^2
+model_quadratic <- glm(Churn ~ TotalCharges_squared, data = train, family = "binomial")
+
+# Plot the logistic regression curve with quadratic transformation
+curve(predict(model_quadratic, newdata = data.frame(TotalCharges_squared = x^2), type = "response"), add = TRUE, col = "orange")
+
+
+# Plot the relationship
+plot(train$tenure, train$Churn, pch = 16, col = ifelse(train$Churn == "Yes", "red", "blue"))
+
+# Fit logistic regression without transformation
+model_linear <- glm(Churn ~ tenure, data = train, family = "binomial")
+
+# Plot the logistic regression curve
+plot(curve(predict(model_linear, newdata = data.frame(tenure = x), type = "response"), add = TRUE, col = "green"))
+
+# Fit logistic regression with a quadratic transformation
+train$tenure_squared <- train$tenure^2
+model_quadratic <- glm(Churn ~ tenure_squared, data = train, family = "binomial")
+
+# Plot the logistic regression curve with quadratic transformation
+curve(predict(model_quadratic, newdata = data.frame(tenure_squared = x^2), type = "response"), add = TRUE, col = "orange")
+```
+Function to evaluate training and testing in models
+```{r}
+evaluation <- function(model,train){
+  # Predict probabilities on the training set
+  train$predicted_prob <- predict(model, newdata = train, type = "response")
+  
+  # ROC curve and AUC for the training set
+  roc_train <- roc(train$Churn, train$predicted_prob)
+  auc_train <- auc(roc_train)
+  
+  # Confusion matrix for the training set
+  threshold_train <- 0.5  # Adjust threshold as needed
+  train$predicted_class <- ifelse(train$predicted_prob >= threshold_train, "Yes", "No")
+  conf_matrix_train <- table(Actual = train$Churn, Predicted = train$predicted_class)
+  
+  # Calculate recall and F1-score for the training set
+  recall_train <- conf_matrix_train["Yes", "Yes"] / sum(conf_matrix_train["Yes", ])
+  precision_train <- conf_matrix_train["Yes", "Yes"] / sum(conf_matrix_train[, "Yes"])
+  f1_score_train <- 2 * (precision_train * recall_train) / (precision_train + recall_train)
+  
+  # Output results for the training set
+  cat("Training Set Metrics:\n")
+  cat("AUC:", auc_train, "\n")
+  print("Confusion Matrix:")
+  print(conf_matrix_train)
+  cat("Recall:", recall_train, "\n")
+  cat("F1-score:", f1_score_train, "\n\n")
+  
+  # Predict probabilities on the test set
+  test$predicted_prob <- predict(model, newdata = test, type = "response")
+  
+  # ROC curve and AUC for the test set
+  roc_test <- roc(test$Churn, test$predicted_prob)
+  auc_test <- auc(roc_test)
+  
+  # Confusion matrix for the test set
+  threshold_test <- 0.5  # Adjust threshold as needed
+  test$predicted_class <- ifelse(test$predicted_prob >= threshold_test, "Yes", "No")
+  conf_matrix_test <- table(Actual = test$Churn, Predicted = test$predicted_class)
+  
+  # Calculate recall for the test set
+  recall_test <- conf_matrix_test["Yes", "Yes"] / sum(conf_matrix_test["Yes", ])
+  precision_test <- conf_matrix_test["Yes", "Yes"] / sum(conf_matrix_test[, "Yes"])
+  f1_score_test <- 2 * (precision_test * recall_test) / (precision_test + recall_test)
+  
+  # Output results for the test set
+  cat("Test Set Metrics:\n")
+  cat("AUC:", auc_test, "\n")
+  print("Confusion Matrix:")
+  print(conf_matrix_test)
+  cat("Recall:", recall_test, "\n")
+  cat("F1-score:", f1_score_test, "\n")
+}
+```
+
+Different models that were tested only for numerical variables. Keep the best one
+```{r}
+set.seed(123)
+#model <- glm(Churn ~ MonthlyCharges + TotalCharges + tenure, data = train, family = "binomial")  # 13
+#model <- glm(Churn ~ MonthlyCharges + I(MonthlyCharges^2) + TotalCharges + I(TotalCharges^2) + tenure, data = train, family = "binomial")  #15
+#model <- glm(Churn ~ I(MonthlyCharges^2) + I(TotalCharges^2) + tenure, data = train, family = "binomial") # 9
+#model <- glm(Churn ~ I(MonthlyCharges^2) + TotalCharges + tenure, data = train, family = "binomial") # 4
+#model <- glm(Churn ~ I(MonthlyCharges^2) + I(TotalCharges^2) + I(tenure^2), data = train, family = "binomial") # 18
+#model <- glm(Churn ~ MonthlyCharges * TotalCharges + tenure, data = train, family = "binomial") # 12
+#model <- glm(Churn ~ MonthlyCharges + TotalCharges*tenure, data = train, family = "binomial") # 17
+#model <- glm(Churn ~ MonthlyCharges*tenure + TotalCharges, data = train, family = "binomial") # 10
+
+#TAKE ONE OUT MODELS
+
+#model <- glm(Churn ~ MonthlyCharges + TotalCharges, data = train, family = "binomial")  #21
+#model <- glm(Churn ~ tenure + TotalCharges, data = train, family = "binomial")  #22
+#model <- glm(Churn ~ MonthlyCharges + tenure, data = train, family = "binomial")   #16
+
+#LOG
+#small_const <- 1e-5
+#model <- glm(Churn ~ log(MonthlyCharges + small_const) + log(TotalCharges + small_const) + log(tenure + small_const), data = train, family = "binomial")   #3
+
+#poly
+
+#model <- glm(Churn ~ poly(MonthlyCharges,2) + poly(TotalCharges,2) + poly(tenure,2), data = train, family = "binomial")  # 6
+#model <- glm(Churn ~ poly(MonthlyCharges,3) + poly(TotalCharges,3) + poly(tenure,3), data = train, family = "binomial") # 7
+#model <- glm(Churn ~ poly(MonthlyCharges,3) + poly(TotalCharges,3) + poly(tenure,2), data = train, family = "binomial")   #8
+#model <- glm(Churn ~ poly(MonthlyCharges,3) + poly(TotalCharges,2) + poly(tenure,3), data = train, family = "binomial")  # 2
+#model <- glm(Churn ~ poly(MonthlyCharges,2) + poly(TotalCharges,3) + poly(tenure,3), data = train, family = "binomial")  # 4 
+model <- glm(Churn ~ poly(MonthlyCharges,2) + poly(TotalCharges,2) + poly(tenure,3), data = train, family = "binomial")  # 1 BEST
+
+
+#I^3
+#model <- glm(Churn ~ I(MonthlyCharges^3) + I(TotalCharges^3) + I(tenure^3), data = train, family = "binomial") #20
+#model <- glm(Churn ~ I(MonthlyCharges^3) + I(TotalCharges^3) + I(tenure^2), data = train, family = "binomial") #11
+#model <- glm(Churn ~ I(MonthlyCharges^3) + I(TotalCharges^2) + I(tenure^2), data = train, family = "binomial") #14
+#model <- glm(Churn ~ I(MonthlyCharges^2) + I(TotalCharges^3) + I(tenure^2), data = train, family = "binomial")  #19
+
+evaluation(model,train)
+```
+Residual Analysis of Numeric Model
+```{r}
+#Getting to know the model
+row_to_predict <- train[843, ]
+prediction <- predict(model, row_to_predict) # -3.12 this is the log odds
+# So less than 0 is predicted not to Churn and greater than 0 means Churn is predicted
+
+residuals <- residuals(model, type = "deviance")
+#For checking heteroscedasticity
+plot(fitted(model), residuals, ylab = "Deviance Residuals", xlab = "Fitted Values")
+abline(h = 0, col = "red", lty = 2)
+qqnorm(residuals)
+qqline(residuals)
+par(mfrow = c(2, 2))
+plot(train$MonthlyCharges, residuals, ylab = "Deviance Residuals", xlab = "MonthlyCharges")
+plot(train$TotalCharges, residuals, ylab = "Deviance Residuals", xlab = "TotalCharges")
+plot(train$tenure, residuals, ylab = "Deviance Residuals", xlab = "tenure")
+cooks.distance <- cooks.distance(model)
+plot(cooks.distance, pch = 20, main = "Cook's Distance") 
+plot(model)
+```
+Remove data points with a Cook's Distance greater than .001
+```{r}
+
+cooksd <- cooks.distance(model)
+outliers <- which(cooksd > 0.001)
+train_clean <- train[-outliers, ]
+
+
+# Model before removing outliers (training set):
+# Confusion Matrix: 1739 540 700 2004  / AUC: 0.8220867  / F1-score: 0.7637195 
+
+# Check model after removing outliers
+model_cleaned <- glm(Churn ~ poly(MonthlyCharges,2) + poly(TotalCharges,2) + poly(tenure,3), data = train_clean, family = "binomial")
+evaluation(model_cleaned,train_clean) # I want to run this on the normal 'train' data set but it gives me an error. 
+# Model after removing outliers (training set):
+# Confusion Matrix: 1733 417 662 2013  / AUC: 0.8607365   / F1-score: 0.7886386
+# This is slightly better
+```
+Adding factors to the numeric model
+
+```{r}
+library(caret)
+
+# Define the function
+find_best_model <- function(data) {
+  # Create a formula template with response variable
+  formula_template <- as.formula("Churn ~ poly(MonthlyCharges,2) + poly(TotalCharges,2) + poly(tenure,3)")
+
+  # List of factors to consider
+  factors <- c("SeniorCitizen", "Partner", "MultipleLines", "InternetService",
+               "OnlineBackup", "StreamingTV", "StreamingMovies", "Contract",
+               "PaperlessBilling", "PaymentMethod")
+
+  # Initialize variables to store the best model and F-score
+  best_model <- NULL
+  best_f_score <- 0
+
+  # Iterate through all possible combinations of factors
+  for (i in 0:(2^length(factors) - 1)) {
+    # Create a binary vector indicating which factors to include
+    factor_subset <- as.logical(intToBits(i))[1:length(factors)]
+
+    # Extract selected factors
+    selected_factors <- factors[factor_subset]
+
+    # Construct the formula dynamically
+    formula <- reformulate(c("poly(MonthlyCharges,2)", "poly(TotalCharges,2)", "poly(tenure,3)", selected_factors), response = "Churn")
+
+    # Fit the logistic regression model
+    model <- glm(formula, data = data, family = "binomial")
+
+    # Make predictions on the training set
+    predictions <- predict(model, newdata = data, type = "response")
+
+    # Convert probabilities to binary predictions
+    binary_predictions <- ifelse(predictions > 0.5, 1, 0)
+
+    # Calculate confusion matrix
+    confusion_matrix <- table(data$Churn, binary_predictions)
+
+    # Calculate precision, recall, and F-score
+    precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+    recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+    f_score <- 2 * (precision * recall) / (precision + recall)
+
+    # Update the best model if the F-score is higher
+    if (f_score > best_f_score) {
+      best_model <- model
+      best_f_score <- f_score
+    }
+  }
+
+  # Return the best model and its F-score
+  return(list(model = best_model, f_score = best_f_score))
+}
+
+# Call the function with your training data
+result <- find_best_model(train)
+best_model <- result$model
+best_f_score <- result$f_score
+
+# Print the best model and its F-score
+print(best_model)
+evaluation(best_model, train)
+best_model$formula
+#print(paste("Best F-score:", best_f_score))
+
+#Best model according to F-Score
+
+f_model <- glm(Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure, 3) + SeniorCitizen + InternetService + StreamingTV + StreamingMovies + Contract, data = train, family = "binomial")
+print(f_model)
+evaluation(f_model, train)
+
+#Warning: prediction from rank-deficient fit; attr(*, "non-estim") has doubtful cases
+#trying to get rid of the linearity
+# cor(train[, numeric_vars])
+# vif(f_model)
+# vif(best_model)
+# alias(f_model)
+# alias(best_model)
+#summary(train)
+# length(best_model$coefficients)
+# best_model$rank
+```
+Residual Analysis of Numeric + Factor Model
+```{r}
+
+residuals2 <- residuals(f_model, type = "deviance")
+#For checking heteroscedasticity
+plot(fitted(f_model), residuals2, ylab = "Deviance Residuals", xlab = "Fitted Values")
+abline(h = 0, col = "red", lty = 2)
+qqnorm(residuals2)
+qqline(residuals2)
+par(mfrow = c(2, 2))
+plot(train$MonthlyCharges, residuals2, ylab = "Deviance Residuals", xlab = "MonthlyCharges")
+plot(train$TotalCharges, residuals2, ylab = "Deviance Residuals", xlab = "TotalCharges")
+plot(train$tenure, residuals2, ylab = "Deviance Residuals", xlab = "tenure")
+cooks.distance <- cooks.distance(f_model)
+plot(cooks.distance, pch = 20, main = "Cook's Distance") 
+plot(f_model)
+
+# Now the normal Q-Q Plot does not follow such a linear pattern
+```
+Remove data points with a Cook's Distance greater than .001
+```{r}
+
+cooksd2 <- cooks.distance(f_model)
+outliers2 <- which(cooksd2 > 0.002)
+train_clean2 <- train[-outliers2, ]
+
+
+# Create model without  outliers
+# f_model_cleaned <- glm(Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure, 3) + SeniorCitizen + InternetService + OnlineBackup + StreamingTV + StreamingMovies + Contract + PaperlessBilling + PaymentMethod, data = train_clean2, family = "binomial")
+
+f_model_cleaned <- glm(Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure, 3) + SeniorCitizen + InternetService + StreamingTV + StreamingMovies + Contract, data = train_clean2, family = "binomial")
+
+
+#Test it only the train_clean2:
+print(f_model_cleaned)
+evaluation(f_model_cleaned, train_clean2)
+
+#Trying the step function
+step_model <- step( f_model_cleaned, k= log(nrow(df)))
+summary(step_model)
+evaluation(step_model, train_clean2)
+#This lowers the AIC, but also lowers the recall
+#So we'll leave the previous model as best
+```
+
+Idea: what if we have a separate model for categorizing points that have a high cooks distance?
+Maybe there is something unique to outliers that gives away whether or not they will churn.
+
+Building the best model with the interactions
+```{r}
+# Builds a model using a formula and data, returns the model and its F1-score on the training data
+build_model_formula <- function(formula, data) {
+  # Fit the logistic regression model
+  model <- glm(formula, data = data, family = "binomial")
+
+  # Make predictions on the training set
+  predictions <- predict(model, newdata = data, type = "response")
+
+  # Convert probabilities to binary predictions
+  binary_predictions <- ifelse(predictions > 0.5, 1, 0)
+
+  # Calculate confusion matrix
+  confusion_matrix <- table(data$Churn, binary_predictions)
+
+  # Calculate precision, recall, and F-score
+  precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+  recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+  f_score <- 2 * (precision * recall) / (precision + recall)
+  
+  return(list(model = model, f_score = f_score))
+}
+
+#Finds the best interactions to fit into the model
+find_best_model2 <- function(data) {
+  # List of factors to consider
+  covariates <- c("poly(MonthlyCharges,2)", "poly(TotalCharges,2)", "poly(tenure,3)")
+  selected_factors <- c("SeniorCitizen", "InternetService", "StreamingTV", "StreamingMovies", "Contract")
+  factors <- c("SeniorCitizen", "Partner", "MultipleLines", "InternetService", "OnlineBackup", "StreamingTV",  "StreamingMovies", "Contract", "PaperlessBilling", "PaymentMethod")
+
+  # Initialize variables to store the best model and F-score
+  best_global_model <- NULL
+  best_global_f_score <- 0
+  
+  # Choose best interactions starting at 1 interaction
+  flen <- length(factors)
+  chosen_interactions <- c()
+  while(TRUE) {
+    
+    best_model <- NULL
+    best_f_score <- 0
+    # Add a dummy interaction to increase the number of interactions for the next for loop
+    chosen_interactions <- c(chosen_interactions, "Contract")
+    for (i in 1:flen^2) {
+      
+      # Remove the previously added interaction
+      chosen_interactions <- chosen_interactions[-length(chosen_interactions)]
+      
+       # Create the forumula with the chosen interactions
+      if(i %% flen == (i-1) %/% flen) next
+      chosen_interactions <- c(chosen_interactions, paste(factors[i %% flen + 1], factors[(i-1) %/% flen + 1], sep="*"))
+      formula <- reformulate(c(covariates, selected_factors, chosen_interactions), response = "Churn")
+      # print(formula)
+    
+      # Build the model
+      result <- build_model_formula(formula, data)
+      model <- result$model
+      f_score <- result$f_score
+      
+      # Update the best model if the F-score is higher
+      if (f_score > best_f_score) {
+        best_model <- model
+        best_f_score <- f_score
+      }
+    }
+    if (best_f_score > best_global_f_score) {
+        best_global_model <- best_model
+        best_global_f_score <- best_f_score
+    } else break
+  }
+
+# Return the best model and its F-score
+  return(list(model = best_model, f_score = best_f_score))
+}
+
+```
+
+
+```{r}
+# Call the function with your training data
+result <- find_best_model2(train_clean2)
+best_model_Winte <- result$model
+best_f_score <- result$f_score
+
+# Print the best model and its F-score
+best_model_Winte$formula
+print(best_model_Winte)
+evaluation(best_model_Winte, train_clean2)
+
+#Best model with interactions
+
+f_model <- glm(Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure, 3) + InternetService + StreamingTV + StreamingMovies + Contract + SeniorCitizen * PaymentMethod + Contract * SeniorCitizen, data = train_clean2, family = "binomial")
+print(f_model)
+evaluation(f_model, train_clean2)
+```
+Residual Analysis of Numeric + Factor + Interactions Model
+```{r}
+
+residuals2 <- residuals(f_model, type = "deviance")
+#For checking heteroscedasticity
+plot(fitted(f_model), residuals2, ylab = "Deviance Residuals", xlab = "Fitted Values")
+abline(h = 0, col = "red", lty = 2)
+qqnorm(residuals2)
+qqline(residuals2)
+par(mfrow = c(2, 2))
+plot(train_clean2$MonthlyCharges, residuals2, ylab = "Deviance Residuals", xlab = "MonthlyCharges")
+plot(train_clean2$TotalCharges, residuals2, ylab = "Deviance Residuals", xlab = "TotalCharges")
+plot(train_clean2$tenure, residuals2, ylab = "Deviance Residuals", xlab = "tenure")
+cooks.distance <- cooks.distance(f_model)
+plot(cooks.distance, pch = 20, main = "Cook's Distance") 
+plot(f_model)
+
+#Added
+residualPlots(f_model, layout=c(1, 3))
+residualPlot(f_model)
+?residualPlots
+influenceIndexPlot(f_model, vars=c("Cook", "hat"))
+
+# Now the normal Q-Q Plot does not follow such a linear pattern
+```
+Remove influential points
+```{r}
+cooksd2 <- cooks.distance(f_model)
+outliers3 <- which(cooksd2 > 0.002)
+train_clean3 <- train_clean2[-outliers3, ]
+
+
+# Create model without  outliers
+f_model_cleaned3 <- glm(Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure, 3) + InternetService + StreamingTV + StreamingMovies + Contract + SeniorCitizen * PaymentMethod + Contract * SeniorCitizen, data = train_clean3, family = "binomial")
+print(f_model_cleaned3)
+evaluation(f_model_cleaned3, train_clean3)
+
+# Model has better AIC and F1score than the previous, so we reiterate to get it even better
+
+# result <- find_best_model2(train_clean3)
+# best_model_Winte2 <- result$model
+# best_f_score2 <- result$f_score
+# best_model_Winte2$formula
+# print(best_model_Winte2)
+# evaluation(best_model_Winte2, train_clean3)
+# Anova(best_model_Winte2)
+
+# This reiteration has given us the same model as before
+
+# Print the best model and its F-score
+# print(best_model_Winte2)
+# evaluation(best_model_Winte2, train_clean3)
+# print(paste("Best F-score:", best_f_score2))
+# Anova(best_model_Winte2)
+# step(best_model_Winte2)
+# evaluation(best_model_Winte2, train_clean3)
+f_model <- glm(Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure, 3) + InternetService + StreamingTV + StreamingMovies + Contract + Contract * SeniorCitizen, data = train_clean2, family = "binomial")
+evaluation(f_model, train_clean3)
+print(f_model)
+
+# We get the same model as before, meaning we cannot get a better model with our method
+# Let us try step
+step(f_model_cleaned3)
+# It shows that this is indeed the best model 
+```
+
+Final analysis
+Goodness of fit and Model Interpretation. Train and Test datasets.
+```{r}
+#Assessment metric: area under the ROC curve score and confusion table prediction capability analysis (recall, F1-score, etc) for train sample and confusion table for test sample.
+
+#Comparing to the previous model using anova
+f_model_cleaned2 <- glm(Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure, 3) + InternetService + StreamingTV + StreamingMovies+ Contract, data = train_clean3, family = "binomial")
+anova(f_model_cleaned2, f_model_cleaned3)
+# Compare residual deviance, AIC and F1-score with the model without interactions
+
+# ROC curve
+library(ROCR)
+roc_data<-prediction(predict(f_model_cleaned3, type="response"), train_clean3$Churn)
+par(mfrow=c(1,1))
+plot(performance(roc_data,"tpr","fpr"))
+abline(0,1,lty=2)
+
+
+# Area under ROC curve, Recall, F1-score, Anova
+f_model_cleaned3$formula
+evaluation(f_model_cleaned3, train_clean3)
+Anova(f_model_cleaned3)
+print(f_model_cleaned3)
+
+#Anova says that StreamingMovies is not significant, but if we take it out all metrics worsen somewhat
+f_model_cleaned_no_movies <- glm(Churn ~ poly(MonthlyCharges, 2) + poly(TotalCharges, 2) + poly(tenure, 3) + InternetService + StreamingTV + Contract + SeniorCitizen * PaymentMethod + Contract * SeniorCitizen, data = train_clean3, family = "binomial")
+print(f_model_cleaned_no_movies)
+evaluation(f_model_cleaned_no_movies, train_clean3)
+Anova(f_model_cleaned_no_movies)
+
+#get the coef() and coef(exp())
+coef(f_model_cleaned3)
+#!!!! Use this one to interpret how each variable predicts whether the customer leaves
+exp(coef(f_model_cleaned3))
+#0.5*(1-0.5)*(coef(f_model_cleaned3))
+```
